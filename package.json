@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json.schemastore.org/package.json",
+  "name": "opencode-remote",
+  "version": "1.0.0",
+  "description": "Expose the OpenCode Web UI through a cloudflared tunnel with an auto-login link and QR code in the TUI.",
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.ts"
+  },
+  "files": [
+    "index.ts",
+    "tui.ts",
+    "qr.ts",
+    "rpc.ts",
+    "README.md",
+    "README.zh-CN.md"
+  ],
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "cloudflared",
+    "tunnel",
+    "qr",
+    "remote",
+    "webui"
+  ],
+  "license": "MIT"
+}
