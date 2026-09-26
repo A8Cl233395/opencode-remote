@@ -45,10 +45,12 @@ Copy the folder into your OpenCode plugin directory:
 
 ```
 ~/.config/opencode/plugins/remote/
-  index.ts
   tui.ts
   qr.ts
   rpc.ts
+
+~/.config/opencode/plugin/remote/
+  index.ts
 ```
 
 Restart OpenCode. If your build does not auto-discover plugin folders, register
