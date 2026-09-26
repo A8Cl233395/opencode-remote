@@ -45,10 +45,12 @@
 
 ```
 ~/.config/opencode/plugins/remote/
-  index.ts
   tui.ts
   qr.ts
   rpc.ts
+
+~/.config/opencode/plugin/remote/
+  index.ts
 ```
 
 重启 OpenCode。如果你的版本不会自动发现插件目录，在
