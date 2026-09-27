@@ -26,6 +26,9 @@ const CONFIG_KEY = "config"
 const SETTINGS_KEY = "settings"
 const RECORD_KEY = "tunnel"
 const AUTO_START_DELAY_MS = 1000
+// How long a failed lazy-heal attempt (triggered by an incoming RPC) waits
+// before another RPC may try again.
+const HEAL_COOLDOWN_MS = 15000
 // How long a starting instance waits for a concurrent instance to publish its
 // tunnel record before reporting the tunnel as occupied by something else.
 const OCCUPANT_WAIT_MS = 8000
@@ -211,6 +214,10 @@ export default {
     let lastKilledPid = 0
     let lastKilledAt = 0
     let disposed = false
+    // Explicit stop keeps the tunnel down until someone starts it again; an
+    // incoming RPC may only heal a tunnel that was not deliberately stopped.
+    let stopped = false
+    let lastHealAt = 0
 
     const cloudflared = () =>
       String(
@@ -318,14 +325,18 @@ export default {
       return new Promise((resolve) => {
         let buffer = ""
         let settled = false
+        let timer: NodeJS.Timeout | undefined
         const finish = (value: string | null) => {
           if (settled) return
           settled = true
-          clearTimeout(timer)
+          if (timer) clearTimeout(timer)
+          // Stop accumulating log lines once the answer is known; keep draining
+          // so a full pipe buffer can never block cloudflared while we are alive.
+          proc.stderr?.off("data", onData)
+          proc.stderr?.resume()
           resolve(value)
         }
-        const timer = setTimeout(() => finish(null), ms)
-        proc.stderr?.on("data", (chunk: Buffer) => {
+        const onData = (chunk: Buffer) => {
           buffer += chunk.toString("utf-8")
           if (extract) {
             const match = buffer.match(extract)
@@ -333,7 +344,9 @@ export default {
             return
           }
           if (pattern.test(buffer)) finish("")
-        })
+        }
+        timer = setTimeout(() => finish(null), ms)
+        proc.stderr?.on("data", onData)
         proc.once("error", () => finish(null))
         proc.once("exit", () => finish(null))
       })
@@ -487,6 +500,7 @@ export default {
     }
 
     function start(): Promise<RemoteStartResult> {
+      stopped = false
       if (activeUrl) return Promise.resolve({ url: activeUrl, authUrl: activeAuthUrl, error: null })
       if (inflight) return inflight
       inflight = startInternal().finally(() => {
@@ -496,6 +510,7 @@ export default {
     }
 
     async function stop(): Promise<{ ok: boolean }> {
+      stopped = true
       opGen++
       const record = await readRecord()
       if (record) {
@@ -512,6 +527,18 @@ export default {
       return { ok: true }
     }
 
+    // Give every incoming RPC a chance to notice a dead connector and bring it
+    // back without waiting for the next plugin load. Only auto-start tunnels are
+    // healed, an explicit stop disables it, and failed attempts are rate limited.
+    async function maybeHeal(): Promise<void> {
+      if (disposed || stopped || activeUrl || starting || inflight) return
+      if (Date.now() - lastHealAt < HEAL_COOLDOWN_MS) return
+      if (await readRecord()) return
+      if (!(await autoStartEnabled())) return
+      lastHealAt = Date.now()
+      void start().catch((error) => console.error("remote: tunnel heal failed", error))
+    }
+
     async function state(): Promise<RemoteState> {
       const cfg = await tunnelConfig()
       const record = await readRecord()
@@ -523,6 +550,7 @@ export default {
         activeUrl = ""
         activeAuthUrl = null
       }
+      await maybeHeal()
       return {
         url: activeUrl || record?.url || null,
         authUrl: activeUrl ? activeAuthUrl : (record?.authUrl ?? null),
@@ -571,7 +599,12 @@ export default {
       state: () => state(),
       start: () => start(),
       stop: () => stop(),
-      configure: (input: { tunnelName?: string; tunnelHostname?: string }) => configure(input),
+      configure: async (input: { tunnelName?: string; tunnelHostname?: string }) => {
+        const result = await configure(input)
+        // Re-check after a config change so a healed tunnel uses the new target.
+        void maybeHeal()
+        return result
+      },
       setAutoStart: (input: { autoStart?: boolean }) => setAutoStart(input),
     })
 
@@ -585,9 +618,9 @@ export default {
     return async () => {
       disposed = true
       opGen++
-      // Unloading this instance must not tear down a tunnel another location
-      // owns; only the process this instance spawned is ours to kill.
-      child?.kill()
+      // Unloading this instance (for example when its location is evicted) must
+      // leave the tunnel process and its record for a later service boot or
+      // another location to adopt; the long-lived service is its parent.
       child = null
       activeUrl = ""
       activeAuthUrl = null
