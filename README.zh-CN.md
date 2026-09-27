@@ -36,7 +36,8 @@
 - 已安装 [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)
   并且在 `PATH` 中，或者通过 `options.cloudflared` / `OPENCODE_CLOUDFLARED` /
   `CLOUDFLARED_PATH` 指定可执行文件路径。
-- 命名隧道要求 cloudflared 隧道已存在并配置了 DNS 路由；不填隧道名时使用
+- 命名隧道要求 cloudflared 隧道已存在并配置了 DNS 路由（见
+  [使用自己的域名](#使用自己的域名命名隧道)）；不填隧道名时使用
   `trycloudflare.com` 快速隧道。
 
 ## 安装
@@ -61,6 +62,41 @@
   ]
 }
 ```
+
+## 使用自己的域名（命名隧道）
+
+默认的快速隧道每次启动都会分配随机的 `*.trycloudflare.com` 地址。要固定在自己的
+域名上，只需一次性准备好命名隧道，再让插件使用它。
+
+1. 把域名接入 Cloudflare 并登录：
+
+   ```sh
+   cloudflared tunnel login
+   ```
+
+2. 创建隧道（已存在可跳过）：
+
+   ```sh
+   cloudflared tunnel create opencode
+   ```
+
+3. 把域名下的主机名路由到隧道：
+
+   ```sh
+   cloudflared tunnel route dns opencode opencode.example.com
+   ```
+
+4. 告诉插件使用哪条隧道和哪个域名，然后运行 `/remote`：
+   - 在 TUI 里执行 `/remote-config`，输入
+     `opencode opencode.example.com`（先隧道名，后主机名）。
+   - 或设置环境变量 `OPENCODE_TUNNEL_NAME=opencode`、
+     `OPENCODE_TUNNEL_HOSTNAME=opencode.example.com`。
+   - 或在插件 options 里设置 `tunnelName` / `tunnelHostname`。
+
+不需要 `config.yml`：插件执行
+`cloudflared tunnel run --url <本地地址> <隧道名>`，并把公网地址显示为
+`https://<tunnelHostname>`。如果已有 `config.yml` 且配置了 ingress 规则，
+请让它们指向插件要隧道的同一本地地址；显式 ingress 规则会覆盖 `--url`。
 
 ## 使用
 

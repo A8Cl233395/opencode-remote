@@ -37,7 +37,8 @@ quick `*.trycloudflare.com` URLs and with named tunnels on your own domain.
   installed and on `PATH`, or the binary path passed via
   `options.cloudflared` / `OPENCODE_CLOUDFLARED` / `CLOUDFLARED_PATH`.
 - A named tunnel requires a cloudflared tunnel that already exists and has a DNS
-  route. Without a tunnel name, a quick `trycloudflare.com` tunnel is used.
+  route (see [Use your own domain](#use-your-own-domain-named-tunnel)). Without
+  a tunnel name, a quick `trycloudflare.com` tunnel is used.
 
 ## Install
 
@@ -61,6 +62,43 @@ the folder in `~/.config/opencode/cli.json`:
   ]
 }
 ```
+
+## Use your own domain (named tunnel)
+
+The default quick tunnel gets a random `*.trycloudflare.com` hostname that
+changes on every start. To keep a stable URL on your own domain, prepare a
+named tunnel once and point the plugin at it.
+
+1. Add the domain to Cloudflare and log in:
+
+   ```sh
+   cloudflared tunnel login
+   ```
+
+2. Create the tunnel (skip if it already exists):
+
+   ```sh
+   cloudflared tunnel create opencode
+   ```
+
+3. Route a hostname on your domain to the tunnel:
+
+   ```sh
+   cloudflared tunnel route dns opencode opencode.example.com
+   ```
+
+4. Tell the plugin which tunnel and hostname to use, then run `/remote`:
+   - In the TUI, run `/remote-config` and enter
+     `opencode opencode.example.com` (tunnel name, then hostname).
+   - Or set `OPENCODE_TUNNEL_NAME=opencode` and
+     `OPENCODE_TUNNEL_HOSTNAME=opencode.example.com`.
+   - Or set `tunnelName` / `tunnelHostname` in the plugin options.
+
+No `config.yml` is needed: the plugin runs
+`cloudflared tunnel run --url <local target> <name>` and reports the public URL
+as `https://<tunnelHostname>`. If you already keep a `config.yml` with ingress
+rules, make sure they point at the same local address the plugin tunnels to;
+explicit ingress rules take precedence over `--url`.
 
 ## Usage
 
