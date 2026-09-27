@@ -53,7 +53,7 @@
 ```
 
 重启 OpenCode。如果你的版本不会自动发现插件目录，在
-`~/.config/opencode/cli.json` 里注册该目录：
+`~/.config/opencode/opencode.json` 里注册该目录：
 
 ```json
 {
@@ -110,7 +110,7 @@
 
 ## 配置
 
-所有选项写在 `cli.json` 的 `plugins` 条目里：
+所有选项写在 `opencode.json(c)` 的 `plugins` 条目里：
 
 ```json
 {

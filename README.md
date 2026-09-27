@@ -53,7 +53,7 @@ Copy the folder into your OpenCode plugin directory:
 ```
 
 Restart OpenCode. If your build does not auto-discover plugin folders, register
-the folder in `~/.config/opencode/cli.json`:
+the folder in `~/.config/opencode/opencode.json`:
 
 ```json
 {
@@ -112,7 +112,7 @@ explicit ingress rules take precedence over `--url`.
 
 ## Configuration
 
-All options go into the `plugins` entry in `cli.json`:
+All options go into the `plugins` entry in `opencode.json(c)`:
 
 ```json
 {
