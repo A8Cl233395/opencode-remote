@@ -10,7 +10,7 @@ quick `*.trycloudflare.com` URLs and with named tunnels on your own domain.
 ```
 ┌─ remote - tunnel is up ─────────────────────────────┐
 │ Public URL: https://random-words-1234.trycloudflare.com
-│ Auto-login link: https://.../?auth_token=...        │
+│ Pairing link: https://.../auth/connect/...          │
 │                                                     │
 │   ▄▄▄▄▄▄▄ ▄  ▄ ▄▄▄▄▄▄▄                             │
 │   █ ▄▄▄ █ ▀▄▀▄█ ▄▄▄ █                             │
@@ -24,7 +24,7 @@ quick `*.trycloudflare.com` URLs and with named tunnels on your own domain.
 ## Features
 
 - `/remote` (alias `/tunnel`) starts the tunnel and shows a QR dialog with the public URL.
-- When the server has a password, the QR encodes an **auto-login link** (`?auth_token=...`) so the phone browser signs in automatically.
+- When the server has a password, the QR encodes a **pairing link** (`/auth/connect/...`) so the phone browser signs in automatically — the 30-day session cookie survives closing the browser. The link is single-use and expires in minutes; a fresh one is minted every time the dialog opens.
 - Quick tunnel (`https://<random>.trycloudflare.com`) or a named tunnel + hostname.
 - **Auto-start**: start the tunnel with the server, and start it immediately when you flip the switch.
 - **Silent mode**: toast notifications instead of the QR dialog.
@@ -148,17 +148,21 @@ the TUI dialogs.
   or from the shared service registration (`service.json`) when OpenCode runs as
   `opencode serve --service`. `options.url` overrides both.
 - One tunnel serves the whole machine. Instances publish a shared `tunnel`
-  record (pid, url, authUrl, local, name); a starting instance adopts a record
+  record (pid, url, local, name); a starting instance adopts a record
   for the same backend instead of spawning a duplicate connector.
 - If two instances race, the lowest PID wins; the other withdraws and adopts the
   winner's record. Disposing a plugin instance never tears down a tunnel that
   another location owns.
-- The auto-login link carries a base64 `opencode:<password>` token; the Web UI
-  consumes it, strips it from the address bar and persists the credential.
+- The pairing link is minted on demand: the plugin calls the local server's
+  `POST /api/pair` (authenticated with the server password from the service
+  record, `options.password`, `OPENCODE_REMOTE_PASSWORD`, or `OPENCODE_PASSWORD`)
+  and encodes `/auth/connect/<code>`. The server redeems the single-use code for
+  a 30-day session cookie (or a session token for API clients), so the sign-in
+  persists across browser restarts and can be revoked by rotating the password.
 
 ## Security
 
-- Anyone with the public URL can reach the Web UI, and the auth link/QR signs
+- Anyone with the public URL can reach the Web UI, and the pairing link/QR signs
   them in. Treat both as secrets.
 - Quick tunnels are public and use random hostnames; stop the tunnel with
   `/remote-stop` when you are done.
@@ -166,7 +170,7 @@ the TUI dialogs.
 ## RPC API
 
 Other plugins can drive the tunnel through the registered RPC methods
-(see `rpc.ts`): `remote.state`, `remote.start`, `remote.stop`,
+(see `rpc.ts`): `remote.state`, `remote.start`, `remote.stop`, `remote.pair`,
 `remote.configure`, `remote.setAutoStart`.
 
 ## License

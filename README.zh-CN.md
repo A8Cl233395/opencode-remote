@@ -10,7 +10,7 @@
 ```
 ┌─ remote - tunnel is up ─────────────────────────────┐
 │ Public URL: https://random-words-1234.trycloudflare.com
-│ Auto-login link: https://.../?auth_token=...        │
+│ Pairing link: https://.../auth/connect/...          │
 │                                                     │
 │   ▄▄▄▄▄▄▄ ▄  ▄ ▄▄▄▄▄▄▄                             │
 │   █ ▄▄▄ █ ▀▄▀▄█ ▄▄▄ █                             │
@@ -24,7 +24,7 @@
 ## 功能
 
 - `/remote`（别名 `/tunnel`）启动隧道，并弹出带公网地址的二维码对话框。
-- 服务端设有密码时，二维码编码的是**自动登录链接**（`?auth_token=...`），手机浏览器打开即自动完成登录。
+- 服务端设有密码时，二维码编码的是**配对链接**（`/auth/connect/...`），手机浏览器打开即自动完成登录——30 天会话 cookie 在关闭浏览器后依然有效。链接一次性、几分钟内过期，每次打开对话框都会现签一条新链接。
 - 快速隧道（`https://<随机>.trycloudflare.com`）或命名隧道 + 自定义域名。
 - **自动启动**：随服务端一起启动隧道；打开开关时会立即启动。
 - **静默模式**：只弹 toast 提示，不显示二维码对话框。
@@ -144,25 +144,28 @@
 - 本地目标地址取自进程参数里的 `--port` / `--hostname`；当 OpenCode 以
   `opencode serve --service` 运行时，则读取共享的 service 注册文件
   （`service.json`）。`options.url` 可覆盖两者。
-- 一台机器一条隧道。各实例会发布共享的 `tunnel` 记录（pid、url、authUrl、
+- 一台机器一条隧道。各实例会发布共享的 `tunnel` 记录（pid、url、
   local、name）；新启动的实例如果发现同一后端的记录，会直接接管，而不是再拉起
   一个连接器。
 - 两个实例竞争时 PID 最小者胜出，另一个退出并接管胜者的记录。卸载插件实例
   不会拆掉属于其它位置的隧道。
-- 自动登录链接携带 base64 的 `opencode:<password>` token；Web UI 会消费它、
-  从地址栏移除并保存该凭据。
+- 配对链接按需现签：插件携带服务端密码（来自 service.json 记录、
+  `options.password`、`OPENCODE_REMOTE_PASSWORD` 或 `OPENCODE_PASSWORD`）调用
+  本地服务的 `POST /api/pair`，生成 `/auth/connect/<code>` 链接。服务端把一次性
+  code 兑换成 30 天会话 cookie（API 客户端则得到会话 token），因此登录在浏览器
+  重启后依然有效；轮换服务器密码即可吊销全部会话。
 
 ## 安全提示
 
-- 任何拿到公网地址的人都能访问 Web UI；自动登录链接 / 二维码等于直接登录。
+- 任何拿到公网地址的人都能访问 Web UI；配对链接 / 二维码等于直接登录。
   两者都要当作机密保管。
 - 快速隧道是公网地址且主机名随机；用完后请用 `/remote-stop` 关闭隧道。
 
 ## RPC API
 
 其它插件可以通过已注册的 RPC 方法驱动隧道（见 `rpc.ts`）：
-`remote.state`、`remote.start`、`remote.stop`、`remote.configure`、
-`remote.setAutoStart`。
+`remote.state`、`remote.start`、`remote.stop`、`remote.pair`、
+`remote.configure`、`remote.setAutoStart`。
 
 ## License
 

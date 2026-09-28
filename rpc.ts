@@ -4,7 +4,6 @@ const stateOutput = {
   type: "object",
   properties: {
     url: { anyOf: [{ type: "string" }, { type: "null" }] },
-    authUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
     starting: { type: "boolean" },
     tunnelName: { type: "string" },
     tunnelHostname: { type: "string" },
@@ -16,7 +15,15 @@ const startOutput = {
   type: "object",
   properties: {
     url: { anyOf: [{ type: "string" }, { type: "null" }] },
-    authUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
+    error: { anyOf: [{ type: "string" }, { type: "null" }] },
+  },
+}
+
+const pairOutput = {
+  type: "object",
+  properties: {
+    link: { anyOf: [{ type: "string" }, { type: "null" }] },
+    expiresIn: { anyOf: [{ type: "number" }, { type: "null" }] },
     error: { anyOf: [{ type: "string" }, { type: "null" }] },
   },
 }
@@ -55,7 +62,6 @@ const autoStartOutput = {
   properties: {
     ok: { type: "boolean" },
     url: { anyOf: [{ type: "string" }, { type: "null" }] },
-    authUrl: { anyOf: [{ type: "string" }, { type: "null" }] },
     error: { anyOf: [{ type: "string" }, { type: "null" }] },
   },
 }
@@ -66,6 +72,7 @@ export const RemoteRpc = {
     state: { input: emptyInput, output: stateOutput },
     start: { input: emptyInput, output: startOutput },
     stop: { input: emptyInput, output: okOutput },
+    pair: { input: emptyInput, output: pairOutput },
     configure: { input: configureInput, output: configureOutput },
     setAutoStart: { input: autoStartInput, output: autoStartOutput },
   },
@@ -74,11 +81,11 @@ export const RemoteRpc = {
 
 export type RemoteState = {
   url: string | null
-  authUrl: string | null
   starting: boolean
   tunnelName: string
   tunnelHostname: string
   autoStart: boolean
 }
 
-export type RemoteStartResult = { url: string | null; authUrl: string | null; error: string | null }
+export type RemoteStartResult = { url: string | null; error: string | null }
+export type RemotePairResult = { link: string | null; expiresIn: number | null; error: string | null }

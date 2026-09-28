@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from "node:child_process"
 import { readFileSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
-import { RemoteRpc, type RemoteStartResult, type RemoteState } from "./rpc"
+import { RemoteRpc, type RemotePairResult, type RemoteStartResult, type RemoteState } from "./rpc"
 
 type PluginContext = {
   app?: { version?: string; channel?: string }
@@ -63,13 +63,6 @@ function normalizeUrl(value: string): string {
 
 type LocalTarget = { url: string; password?: string }
 
-// Browser links can authenticate with ?auth_token=<base64("user:password")>;
-// the Web UI consumes it, strips it from the address bar, and persists the credential.
-function authenticatedUrl(url: string, password: string): string {
-  const token = Buffer.from(`opencode:${password}`, "utf8").toString("base64")
-  return `${url}/?auth_token=${encodeURIComponent(token)}`
-}
-
 function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0)
@@ -85,7 +78,6 @@ function processAlive(pid: number): boolean {
 type TunnelRecord = {
   pid: number
   url: string
-  authUrl: string | null
   local: string
   name: string
   startedAt: number
@@ -207,7 +199,6 @@ export default {
 
     let child: { proc: ChildProcess; kill: () => void } | null = null
     let activeUrl = ""
-    let activeAuthUrl: string | null = null
     let starting = false
     let inflight: Promise<RemoteStartResult> | null = null
     let opGen = 0
@@ -248,8 +239,16 @@ export default {
 
     function localTarget(): LocalTarget | undefined {
       const forced = String(optionText("url") || (process.env.OPENCODE_REMOTE_URL ?? "").trim()).trim()
-      if (forced) return { url: normalizeUrl(forced) }
-      return deriveLocalTarget(String(ctx.app?.channel ?? "latest"))
+      // Pairing needs the server password; the shared service record already carries it.
+      const password =
+        optionText("password") ||
+        process.env.OPENCODE_REMOTE_PASSWORD?.trim() ||
+        process.env.OPENCODE_PASSWORD?.trim() ||
+        undefined
+      if (forced) return password ? { url: normalizeUrl(forced), password } : { url: normalizeUrl(forced) }
+      const derived = deriveLocalTarget(String(ctx.app?.channel ?? "latest"))
+      if (!derived || derived.password) return derived
+      return password ? { ...derived, password } : derived
     }
 
     function tunnelURL(cfg: { hostname: string }): string | null {
@@ -263,10 +262,6 @@ export default {
         lastKilledPid = pid
         lastKilledAt = Date.now()
       }
-    }
-
-    function noteKilled(proc: ChildProcess) {
-      noteKilledPid(Number(proc.pid))
     }
 
     async function readRecord(): Promise<TunnelRecord | undefined> {
@@ -283,7 +278,6 @@ export default {
       return {
         pid,
         url: stored.url,
-        authUrl: typeof stored.authUrl === "string" ? stored.authUrl : null,
         local: typeof stored.local === "string" ? stored.local : "",
         name: typeof stored.name === "string" ? stored.name : "",
         startedAt: Number(stored.startedAt) || 0,
@@ -378,33 +372,29 @@ export default {
         if (!target) {
           return {
             url: null,
-            authUrl: null,
             error:
               "backend is not listening on a TCP port; start opencode with --port, or set options.url / OPENCODE_REMOTE_URL",
           }
         }
         const existing = await readRecord()
-        if (opGen !== myGen) return { url: null, authUrl: null, error: null }
+        if (opGen !== myGen) return { url: null, error: null }
         if (existing && (!existing.local || existing.local === target.url)) {
           activeUrl = existing.url
-          activeAuthUrl = existing.authUrl
-          return { url: existing.url, authUrl: existing.authUrl, error: null }
+          return { url: existing.url, error: null }
         }
         const occupants = await findOccupantPids(target.url, cfg.name)
-        if (opGen !== myGen) return { url: null, authUrl: null, error: null }
+        if (opGen !== myGen) return { url: null, error: null }
         if (occupants.length > 0) {
           // Another plugin instance may be mid-start; give it a moment to publish
           // its record so both instances converge on the same process.
           const adopted = await waitForRecord(occupants, OCCUPANT_WAIT_MS)
-          if (opGen !== myGen) return { url: null, authUrl: null, error: null }
+          if (opGen !== myGen) return { url: null, error: null }
           if (adopted) {
             activeUrl = adopted.url
-            activeAuthUrl = adopted.authUrl
-            return { url: adopted.url, authUrl: adopted.authUrl, error: null }
+            return { url: adopted.url, error: null }
           }
           return {
             url: null,
-            authUrl: null,
             error: `tunnel already in use: system already has a cloudflared process (PID ${occupants[0]}) using the same tunnel/backend`,
           }
         }
@@ -415,7 +405,6 @@ export default {
         } catch {
           return {
             url: null,
-            authUrl: null,
             error: "could not start cloudflared; install it or set OPENCODE_CLOUDFLARED",
           }
         }
@@ -434,7 +423,6 @@ export default {
           if (child === handle) {
             child = null
             activeUrl = ""
-            activeAuthUrl = null
           }
           if (Number.isInteger(pid) && pid > 0) void removeRecord(pid)
         }
@@ -450,14 +438,13 @@ export default {
 
         if (opGen !== myGen) {
           handle.kill()
-          return { url: null, authUrl: null, error: null }
+          return { url: null, error: null }
         }
         if (!url) {
           handle.kill()
           clear()
           return {
             url: null,
-            authUrl: null,
             error: expected
               ? `named tunnel "${cfg.name}" failed to connect; check that it exists and has a DNS route`
               : "could not obtain the public URL; check the network and retry",
@@ -475,25 +462,22 @@ export default {
             const winner = await waitForRecord([winnerPid], OCCUPANT_WAIT_MS)
             if (winner) {
               activeUrl = winner.url
-              activeAuthUrl = winner.authUrl
-              return { url: winner.url, authUrl: winner.authUrl, error: null }
+              return { url: winner.url, error: null }
             }
-            return { url: null, authUrl: null, error: "tunnel start raced another instance; retry" }
+            return { url: null, error: "tunnel start raced another instance; retry" }
           }
         }
         activeUrl = url
-        activeAuthUrl = target.password ? authenticatedUrl(url, target.password) : null
         await ctx.storage
           .set(RECORD_KEY, {
             pid,
             url,
-            authUrl: activeAuthUrl,
             local: target.url,
             name: cfg.name,
             startedAt: Date.now(),
           } satisfies TunnelRecord)
           .catch(() => {})
-        return { url, authUrl: activeAuthUrl, error: null }
+        return { url, error: null }
       } finally {
         starting = false
       }
@@ -501,7 +485,7 @@ export default {
 
     function start(): Promise<RemoteStartResult> {
       stopped = false
-      if (activeUrl) return Promise.resolve({ url: activeUrl, authUrl: activeAuthUrl, error: null })
+      if (activeUrl) return Promise.resolve({ url: activeUrl, error: null })
       if (inflight) return inflight
       inflight = startInternal().finally(() => {
         inflight = null
@@ -523,7 +507,6 @@ export default {
       child?.kill()
       child = null
       activeUrl = ""
-      activeAuthUrl = null
       return { ok: true }
     }
 
@@ -546,18 +529,54 @@ export default {
       const ownAlive = Number.isInteger(ownPid) && ownPid > 0 && processAlive(ownPid)
       // An adopted tunnel has no local child process; if its shared record is
       // gone the process is gone too, so drop the stale view.
-      if (activeUrl && !record && !ownAlive) {
-        activeUrl = ""
-        activeAuthUrl = null
-      }
+      if (activeUrl && !record && !ownAlive) activeUrl = ""
       await maybeHeal()
       return {
         url: activeUrl || record?.url || null,
-        authUrl: activeUrl ? activeAuthUrl : (record?.authUrl ?? null),
         starting: starting || inflight !== null,
         tunnelName: cfg.name,
         tunnelHostname: cfg.hostname,
         autoStart: await autoStartEnabled(),
+      }
+    }
+
+    // Pairing links replace the old ?auth_token= links: the browser redeems the
+    // single-use code for a 30-day session cookie, so the sign-in survives
+    // closing the browser. Codes expire in minutes, so links are minted on demand.
+    async function pairLink(): Promise<RemotePairResult> {
+      const record = await readRecord()
+      const url = activeUrl || record?.url
+      if (!url) return { link: null, expiresIn: null, error: "tunnel is not running" }
+      const target = localTarget()
+      if (!target) return { link: null, expiresIn: null, error: "backend is not listening on a TCP port" }
+      if (!target.password) {
+        return { link: null, expiresIn: null, error: "server password unknown; sign in manually in the web UI" }
+      }
+      try {
+        const response = await fetch(`${target.url}/api/pair`, {
+          method: "POST",
+          headers: {
+            authorization: `Basic ${Buffer.from(`opencode:${target.password}`, "utf8").toString("base64")}`,
+          },
+          signal: AbortSignal.timeout(5000),
+        })
+        if (!response.ok) {
+          return { link: null, expiresIn: null, error: `pairing code request failed with HTTP ${response.status}` }
+        }
+        const body = (await response.json()) as { code?: unknown; expires_in?: unknown }
+        const code = typeof body.code === "string" ? body.code : ""
+        if (!code) return { link: null, expiresIn: null, error: "pairing code request returned no code" }
+        return {
+          link: `${url}/auth/connect/${encodeURIComponent(code)}`,
+          expiresIn: Number(body.expires_in) || null,
+          error: null,
+        }
+      } catch (error) {
+        return {
+          link: null,
+          expiresIn: null,
+          error: `pairing code request failed: ${error instanceof Error ? error.message : String(error)}`,
+        }
       }
     }
 
@@ -586,19 +605,20 @@ export default {
       await ctx.storage.set(SETTINGS_KEY, next)
       const saved = (await ctx.storage.get(SETTINGS_KEY).catch(() => undefined)) as { autoStart?: boolean } | undefined
       const ok = saved?.autoStart === next.autoStart
-      if (!ok) return { ok, url: null, authUrl: null, error: "saved configuration did not read back" }
-      if (!next.autoStart) return { ok, url: null, authUrl: null, error: null }
+      if (!ok) return { ok, url: null, error: "saved configuration did not read back" }
+      if (!next.autoStart) return { ok, url: null, error: null }
       // Enabling auto-start starts the tunnel now too: the shared service is
       // long-lived, so waiting for the next server boot would make the switch
       // look inert until the service restarts.
       const result = await start()
-      return { ok, url: result.url, authUrl: result.authUrl, error: result.error }
+      return { ok, url: result.url, error: result.error }
     }
 
     const registration = await ctx.rpc.register(RemoteRpc, {
       state: () => state(),
       start: () => start(),
       stop: () => stop(),
+      pair: () => pairLink(),
       configure: async (input: { tunnelName?: string; tunnelHostname?: string }) => {
         const result = await configure(input)
         // Re-check after a config change so a healed tunnel uses the new target.
@@ -623,7 +643,6 @@ export default {
       // another location to adopt; the long-lived service is its parent.
       child = null
       activeUrl = ""
-      activeAuthUrl = null
       await registration.dispose()
     }
   },

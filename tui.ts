@@ -51,21 +51,26 @@ export default {
       parseBool(ctx.options.silent) ??
       settings.silent === true
 
-    const showQR = (url: string, authUrl: string | null) => {
+    // The QR carries a pairing link: opening it signs the browser in for 30 days
+    // via a session cookie, so the login survives closing the browser. The link
+    // is minted per display because pairing codes are single-use and short-lived.
+    const showQR = async (url: string) => {
+      const pairing = await rpc.pair({})
       let qr = ""
       try {
-        qr = renderQR(makeQR(authUrl ?? url))
+        qr = renderQR(makeQR(pairing.link ?? url))
       } catch (error) {
         qr = `(QR failed: ${error instanceof Error ? error.message : String(error)})`
       }
+      const minutes = Math.max(1, Math.round((pairing.expiresIn ?? 300) / 60))
       const message = [
         `Public URL: ${url}`,
-        ...(authUrl
+        ...(pairing.link
           ? [
-              `Auto-login link: ${authUrl}`,
-              "The QR and link above sign in automatically and grant server access; keep them private.",
+              `Pairing link: ${pairing.link}`,
+              `The QR and link above sign you in for 30 days; the link works once and expires in ${minutes} minutes. Keep them private.`,
             ]
-          : []),
+          : [`Pairing link unavailable: ${pairing.error ?? "unknown error"}; sign in manually in the web UI.`]),
         "",
         qr,
         "",
@@ -80,7 +85,7 @@ export default {
       const state = await rpc.state({})
       if (state.url) {
         if (silent()) toast(`already up: ${state.url}`, "success")
-        else showQR(state.url, state.authUrl)
+        else await showQR(state.url)
         return
       }
       toast("starting tunnel...")
@@ -90,7 +95,7 @@ export default {
         return
       }
       if (silent()) toast(`up: ${result.url}`, "success")
-      else showQR(result.url, result.authUrl)
+      else await showQR(result.url)
     }
 
     const commands = [
@@ -181,7 +186,7 @@ export default {
           }
           toast(`auto-start on${envNote}`, "success")
           if (silent()) toast(`up: ${result.url}`, "success")
-          else showQR(result.url, result.authUrl)
+          else await showQR(result.url)
         },
       },
       {

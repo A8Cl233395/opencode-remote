@@ -1,8 +1,8 @@
 {
   "$schema": "https://json.schemastore.org/package.json",
   "name": "opencode-remote",
-  "version": "1.0.0",
-  "description": "Expose the OpenCode Web UI through a cloudflared tunnel with an auto-login link and QR code in the TUI.",
+  "version": "1.1.0",
+  "description": "Expose the OpenCode Web UI through a cloudflared tunnel with a pairing link (30-day sign-in) and QR code in the TUI.",
   "type": "module",
   "exports": {
     ".": "./index.ts",
